@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Traffic Camera Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .hud-label { background: rgba(0, 0, 0, 0.85); color: #00ffcc; font-family: monospace; }
+    </style>
+</head>
+<body class="bg-slate-900 text-white font-sans min-h-screen">
+
+    <header class="border-b border-slate-800 bg-slate-950 p-4 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-camera-radar text-cyan-400 text-2xl animate-pulse"></i>
+                <h1 class="text-xl font-bold tracking-wider">AI TRAFFIC VISION <span class="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30">ONLINE</span></h1>
+            </div>
+            <div id="server-status" class="flex items-center space-x-2 text-sm bg-slate-800 px-3 py-1.5 rounded-lg text-rose-400">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                <span>সার্ভার অফলাইন</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 space-y-4">
+            <div class="relative bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl aspect-video flex items-center justify-center">
+                <video id="webcam" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+                <canvas id="canvas" class="hidden"></canvas>
+                
+                <div id="camera-placeholder" class="text-center p-6 space-y-4">
+                    <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto border border-slate-700">
+                        <i class="fa-solid fa-video-slash text-slate-500 text-3xl"></i>
+                    </div>
+                    <p class="text-slate-400 max-w-sm">লাইভ এআই ট্র্যাকিং শুরু করতে নিচের বাটনে ক্লিক করুন।</p>
+                </div>
+
+                <div id="ai-box" class="absolute border-2 border-cyan-400 shadow-[0_0_15px_#00ffcc] hidden pointer-events-none transition-all duration-300">
+                    <div class="hud-label absolute -top-24 left-0 p-2 rounded text-xs space-y-0.5 whitespace-nowrap border border-cyan-500/30">
+                        <div id="box-type" class="text-amber-400 font-bold"></div>
+                        <div id="box-speed"></div>
+                        <div id="box-plate"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                <button id="start-btn" onclick="startSystem()" class="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold px-5 py-2.5 rounded-lg transition flex items-center space-x-2 cursor-pointer">
+                    <i class="fa-solid fa-power-off"></i> <span>সিস্টেম চালু করুন</span>
+                </button>
+                <button id="stop-btn" onclick="stopSystem()" class="bg-slate-800 hover:bg-slate-700 text-rose-400 font-medium px-5 py-2.5 rounded-lg transition flex items-center space-x-2 cursor-pointer hidden">
+                    <i class="fa-solid fa-stop"></i> <span>বন্ধ করুন</span>
+                </button>
+                <div class="text-xs text-slate-500 font-mono">FPS: <span class="text-cyan-400">30</span></div>
+            </div>
+        </div>
+
+        <div class="bg-slate-950 p-5 rounded-2xl border border-slate-800 flex flex-col h-[450px]">
+            <h3 class="font-bold text-slate-300 border-b border-slate-800 pb-3 mb-3 flex items-center justify-between">
+                <span>লাইভ প্লেট ও স্পিড লগ</span>
+                <i class="fa-solid fa-list-check text-cyan-400"></i>
+            </h3>
+            <div id="log-container" class="space-y-3 overflow-y-auto flex-1 text-sm">
+                <div class="text-slate-500 text-center py-8">সিস্টেম চালু হলে এখানে লাইভ ডাটা এন্ট্রি হবে...</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const aiBox = document.getElementById('ai-box');
+        const logContainer = document.getElementById('log-container');
+        let socket;
+        let frameInterval;
+
+        // আপনার Render অনলাইন সার্ভার লিংকটি এখানে সফলভাবে যুক্ত করা হয়েছে
+        const SERVER_URL = "wss://ai-camera-backend-nk79.onrender.com/ws/traffic-vision"; 
+
+        async function startSystem() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = stream;
+                video.classList.remove('hidden');
+                document.getElementById('camera-placeholder').classList.add('hidden');
+                document.getElementById('start-btn').classList.add('hidden');
+                document.getElementById('stop-btn').classList.remove('hidden');
+
+                initWebSocket();
+            } catch (err) {
+                alert("ক্যামেরা অন করা যায়নি! পারমিশন দিন।");
+            }
+        }
+
+        function initWebSocket() {
+            socket = new WebSocket(SERVER_URL);
+
+            socket.onopen = () => {
+                document.getElementById('server-status').className = "flex items-center space-x-2 text-sm bg-slate-800 px-3 py-1.5 rounded-lg text-emerald-400";
+                document.getElementById('server-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span><span>সার্ভার অনলাইন</span>';
+                logContainer.innerHTML = '';
+                
+                // প্রতি ১ সেকেন্ড পর পর ক্যামেরার ফ্রেম ব্যাক-এন্ডে পাঠানো
+                frameInterval = setInterval(sendFrame, 1000);
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateUI(data);
+            };
+
+            socket.onclose = () => {
+                stopSystem();
+                alert("সার্ভার কানেকশন বন্ধ হয়ে গেছে।");
+            };
+        }
+
+        function sendFrame() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.videoWidth / 4; // সাইজ ছোট করে স্পিড বাড়ানোর জন্য
+                canvas.height = video.videoHeight / 4;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                socket.send(canvas.toDataURL('image/jpeg', 0.4)); 
+            }
+        }
+
+        function updateUI(data) {
+            // স্ক্রিনে বক্স আপডেট
+            aiBox.style.left = data.box.left + "%";
+            aiBox.style.top = data.box.top + "%";
+            aiBox.style.width = data.box.width + "%";
+            aiBox.style.height = data.box.height + "%";
+            aiBox.classList.remove('hidden');
+
+            if(data.is_overspeed) {
+                aiBox.style.borderColor = '#f43f5e';
+                aiBox.style.boxShadow = '0 0 15px #f43f5e';
+            } else {
+                aiBox.style.borderColor = '#22d3ee';
+                aiBox.style.boxShadow = '0 0 15px #22d3ee';
+            }
+
+            document.getElementById('box-type').innerText = `🚗 ${data.vehicle_type.toUpperCase()}`;
+            document.getElementById('box-speed').innerHTML = `স্পিড: <span class="${data.is_overspeed ? 'text-rose-500 font-bold':'text-emerald-400'}">${data.speed} KM/H</span>`;
+            document.getElementById('box-plate').innerHTML = `প্লেট: <span class="bg-white text-black px-1 rounded font-bold text-[10px]">${data.plate}</span>`;
+
+            // লগে ডেটা যোগ করা
+            const logItem = document.createElement('div');
+            logItem.className = `p-3 rounded-xl border ${data.is_overspeed ? 'bg-rose-950/30 border-rose-900/50' : 'bg-slate-900 border-slate-800'}`;
+            logItem.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="font-bold text-xs ${data.is_overspeed ? 'text-rose-400':'text-cyan-400'}">${data.vehicle_type}</span>
+                    <span class="text-xs text-slate-500">${new Date().toLocaleTimeString()}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <div class="bg-white text-black px-1 rounded text-xs font-bold">${data.plate}</div>
+                    <div class="font-bold ${data.is_overspeed ? 'text-rose-500':'text-emerald-400'}">${data.speed} KM/H</div>
+                </div>`;
+            logContainer.insertBefore(logItem, logContainer.firstChild);
+        }
+
+        function stopSystem() {
+            clearInterval(frameInterval);
+            if (socket) socket.close();
+            if (video.srcObject) video.srcObject.getTracks().forEach(track => track.stop());
+            
+            video.classList.add('hidden');
+            aiBox.classList.add('hidden');
+            document.getElementById('camera-placeholder').classList.remove('hidden');
+            document.getElementById('start-btn').classList.remove('hidden');
+            document.getElementById('stop-btn').classList.add('hidden');
+            document.getElementById('server-status').className = "flex items-center space-x-2 text-sm bg-slate-800 px-3 py-1.5 rounded-lg text-rose-400";
+            document.getElementById('server-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span><span>সার্ভার অফলাইন</span>';
+        }
+    </script>
+</body>
+</html>
