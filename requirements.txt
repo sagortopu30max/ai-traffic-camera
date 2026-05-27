@@ -3,5 +3,3 @@ uvicorn[standard]
 websockets
 opencv-python-headless
 numpy
-ultralytics
-easyocr
